@@ -1,0 +1,4 @@
+obse==1.2.0
+py_sysml_rdf==0.0.1
+rdflib==6.2.0
+argparse==1.4.0
