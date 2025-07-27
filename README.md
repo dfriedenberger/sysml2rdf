@@ -9,6 +9,8 @@ python main.py --input-sysml ../../../workspace-papyrus/SQuIRRL/SQuIRRL.uml --ou
 #python main.py --input-sysml ../../../xmi-codegen/cleaned.xmi --output-rdf ../../../rdf2visjs/app/data/sysml-eulynx.ttl
 
 
-docker image
+## Build docker image
 
-$ docker build -t frittenburger/sysml2rdf:dev .
+```
+docker build -t frittenburger/sysml2rdf:dev .
+```
