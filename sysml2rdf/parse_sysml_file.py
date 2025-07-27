@@ -5,38 +5,41 @@ from .sysml_collector import SysMLCollector
 logger = logging.getLogger(__name__)
 
 
-def search_nested_requirements(clazz, clazz_id, collector: SysMLCollector):
-    for child in clazz:
-        child_type = child.get("{http://www.omg.org/spec/XMI/20131001}type")  # Typ des Child-Elements
-        child_id = child.get("{http://www.omg.org/spec/XMI/20131001}id")
-        print(f"  Child Element: {child.tag}, Type: {child_type} ID: {child_id}")
-        if child_type == "uml:Class":
-            if child_id in collector.dict_requirements:
-                client_clazz_name = child.get("name")
-                collector.dict_requirements[child_id]["name"] = client_clazz_name
-                collector.dict_requirements[child_id]["nested"] = []
+# Define namespaces for XML parsing
+# depending on the UML version in your file
+XMI_NAMESPACE = "http://www.omg.org/spec/XMI/20131001"
+UML_NAMESPACE = "http://www.eclipse.org/uml2/5.0.0/UML"
+REQ_NAMESPACE = "http://www.eclipse.org/papyrus/sysml/1.6/SysML/Requirements"
 
-                collector.dict_requirements[clazz_id]["nested"].append(child_id)
-
-                search_nested_requirements(child, child_id, collector)
+ns = {
+    "xmi": XMI_NAMESPACE,
+    "uml": UML_NAMESPACE,
+    "req": REQ_NAMESPACE
+}
 
 
-def print_collected_data(collector: SysMLCollector):
-    print("\nActors:")
-    for actor_id, actor in collector.dict_actors.items():
-        print(f"ID: {actor_id}, {actor}")
-    print("\nUse Cases:")
-    for use_case_id, use_case in collector.dict_use_cases.items():
-        print(f"ID: {use_case_id}, {use_case}")
-    print("\nSubjects:")
-    for subject_id, subject in collector.dict_subjects.items():
-        print(f"ID: {subject_id}, {subject}")
-    print("\nAssociations:")
-    for association_id, association in collector.dict_associations.items():
-        print(f"ID: {association_id}, {association}")
-    print("\nRequirements:")
-    for requirement_id, requirement in collector.dict_requirements.items():
-        print(f"ID: {requirement_id}, {requirement}")
+def handle_association_property(packaged_element, child, collector: SysMLCollector):
+    # <ownedEnd xmi:type="uml:Property" xmi:id="_hhw8gFKJEfCGt4EH7VyqHw" name="exchange data securely" type="_VxOtsFKJEfCGt4EH7VyqHw" association="_hhsEAFKJEfCGt4EH7VyqHw"/>
+    #  <ownedAttribute xmi:type="uml:Property" xmi:id="_IExws17-EfC7zM_i7orNRw" name="kme-2" type="_2xU90F77EfC7zM_i7orNRw" association="_IExwsF7-EfC7zM_i7orNRw">
+    xmi_id = child.get("association")
+    node = child.get("type")
+
+    aggregation = child.get("aggregation")
+    if aggregation:
+        collector.set(xmi_id, "aggregation", aggregation)
+
+    collector.append(xmi_id, "nodes", node)
+
+
+# Define injections for child elements
+injections = {
+    "uml:Association": {
+        "uml:Property": handle_association_property
+    },
+    "uml:Class": {
+        "uml:Property": handle_association_property
+    }
+}
 
 
 def parse_sysml_file(file_path) -> SysMLCollector:
@@ -51,94 +54,30 @@ def parse_sysml_file(file_path) -> SysMLCollector:
     tree = ET.parse(file_path)
     root = tree.getroot()
 
-    # define namespaces for XML parsing
-    # depending on the UML version in your file
-
-    XMI_NAMESPACE = "http://www.omg.org/spec/XMI/20131001"
-    UML_NAMESPACE = "http://www.eclipse.org/uml2/5.0.0/UML"
-    REQ_NAMESPACE = "http://www.eclipse.org/papyrus/sysml/1.6/SysML/Requirements"
-
-    ns = {
-        "xmi": XMI_NAMESPACE,
-        "uml": UML_NAMESPACE,
-        "req": REQ_NAMESPACE
-    }
-
     collector = SysMLCollector()
 
-    # Alle Actors im Modell suchen
-    for actor in root.findall(".//packagedElement[@xmi:type='uml:Actor']", ns):
-        name = actor.get("name")  # Namen des Actors auslesen
-        actor_id = actor.get(f"{{{XMI_NAMESPACE}}}id")  # XMI-ID mit Namespace
+    # PackedElement ist das Root-Element für UML-Modelle
+    for packaged_element in root.findall(".//packagedElement", ns):
+        xmi_id = packaged_element.get(f"{{{XMI_NAMESPACE}}}id")  # XMI-ID mit Namespace
+        xmi_type = packaged_element.get(f"{{{XMI_NAMESPACE}}}type")  # XMI-Typ mit Namespace
+        name = packaged_element.get("name")  # Namen des Actors auslesen
+        print(f"Packaged Element: {name}, ID: {xmi_id}, Type: {xmi_type}")
+        collector.set(xmi_id, "name", name)
+        collector.set(xmi_id, "type", xmi_type)
 
-        # print(f"Actor: {name}, ID: {actor_id}")
-        collector.dict_actors[actor_id] = {"name": name}
+        for child in packaged_element:
+            child_type = child.get(f"{{{XMI_NAMESPACE}}}type")
+            child_id = child.get(f"{{{XMI_NAMESPACE}}}id")
+            print(f"  Child Element: {child.tag}, Type: {child_type} ID: {child_id}")
 
-    # Alle Use Cases im Modell suchen
-    for use_case in root.findall(".//packagedElement[@xmi:type='uml:UseCase']", ns):
-        name = use_case.get("name")  # Namen des Use Cases auslesen
-        use_case_id = use_case.get("{http://www.omg.org/spec/XMI/20131001}id")  # XMI-ID mit Namespace
+            if xmi_type in injections and child_type in injections[xmi_type]:
+                injections[xmi_type][child_type](packaged_element, child, collector)
 
-        # print(f"Use Case: {name}, ID: {use_case_id}")
-        collector.dict_use_cases[use_case_id] = {"name": name}
-
-    # Alle Subjects im Modell suchen
-    for subject in root.findall(".//packagedElement[@xmi:type='uml:Component']", ns):
-        name = subject.get("name")  # Namen des Subjects auslesen
-        subject_id = subject.get("{http://www.omg.org/spec/XMI/20131001}id")  # XMI-ID mit Namespace
-        use_cases = subject.get("useCase", "").strip().split(" ")
-        # print(f"Subject: {name}, ID: {subject_id} UseCases: {use_cases}")
-        collector.dict_subjects[subject_id] = {"name": name, "use_cases": use_cases}
-
-        for child in subject:
-            child_type = child.get("{http://www.omg.org/spec/XMI/20131001}type")  # Typ des Child-Elements
-            child_id = child.get("{http://www.omg.org/spec/XMI/20131001}id")      
-            # print(f"  Child Element: {child.tag}, Type: {type} ID: {child_id}")
-            if child_type == "uml:UseCase":
-                use_case_name = child.get("name")
-                collector.dict_use_cases[child_id] = {"name": use_case_name}
-
-    # Alle Associations im Modell suchen
-    for association in root.findall(".//packagedElement[@xmi:type='uml:Association']", ns):
-        association_id = association.get("{http://www.omg.org/spec/XMI/20131001}id")  # XMI-ID mit Namespace
-
-        # print(f"Association: ID: {association_id}")
-        association_data = {}
-        for child in association:
-            child_type = child.get("{http://www.omg.org/spec/XMI/20131001}type")  # Typ des Child-Elements
-            child_id = child.get("{http://www.omg.org/spec/XMI/20131001}id")
-            # print(f"  Child Element: {child.tag}, Type: {child_type} ID: {child_id}")
-            if child_type == "uml:Property":
-                child_id = child.get("type")
-                if child_id in collector.dict_use_cases:
-                    association_data["use_case"] = child_id
-                elif child_id in collector.dict_actors:
-                    association_data["actor"] = child_id
-                else:
-                    print(f"Warning: Use Case ID {use_case_id} not found in dict_use_cases or dict_actors")
-
-        if association_data:
-            collector.dict_associations[association_id] = association_data
-
-
-    # Requirements
-
-    # Alle Requirement-Elemente finden
-    for requirement in root.findall(".//req:Requirement", ns):
-        requirement_id = requirement.get("id")
-        requirement_text = requirement.get("text")
-        requirement_base_Class = requirement.get("base_Class")
-        print(f"Requirement: Id: {requirement_id}, requirement_base_Class: {requirement_base_Class} text: {requirement_text}")
-        collector.dict_requirements[requirement_base_Class] = {"requirement_id": requirement_id, "text": requirement_text}
-
-    for clazz in root.findall(".//packagedElement[@xmi:type='uml:Class']", ns):
-        clazz_id = clazz.get("{http://www.omg.org/spec/XMI/20131001}id")
-        clazz_name = clazz.get("name")
-        print(f"Class: {clazz_name}, ID: {clazz_id}")
-
-        if clazz_id in collector.dict_requirements:
-            collector.dict_requirements[clazz_id]["name"] = clazz_name
-            collector.dict_requirements[clazz_id]["nested"] = []
-            search_nested_requirements(clazz, clazz_id, collector)
+    # find all comments (xmi:type="uml:Comment")
+    for comment in root.findall(".//*[@xmi:type='uml:Comment']", namespaces=ns):
+        comment_for_id = comment.get("annotatedElement")
+        comment_body = comment.find("body").text
+        print(f"  Comment ID: {comment_for_id}, Body: {comment_body}")
+        collector.append(comment_for_id, "comment", comment_body)
 
     return collector
